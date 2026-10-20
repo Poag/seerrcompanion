@@ -37,7 +37,7 @@ main{max-width:860px;margin:0 auto;padding:16px}h1{font-size:20px}h2{font-size:1
 button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
 button.del{border-color:var(--bad);color:var(--bad)}button.keep{border-color:var(--acc);color:var(--acc)}
 input{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%;margin:4px 0 12px}
-a{color:var(--acc)}.msg{padding:8px 12px;border-radius:8px;border:1px solid var(--line);margin:10px 0}.err{border-color:var(--bad);color:var(--bad)}
+a{color:var(--acc)}.bar{margin:8px 0;min-height:34px}button:disabled{opacity:.4;cursor:default}.msg{padding:8px 12px;border-radius:8px;border:1px solid var(--line);margin:10px 0}.err{border-color:var(--bad);color:var(--bad)}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line)}
 nav{display:flex;gap:16px;align-items:center;margin-bottom:8px}nav a{text-decoration:none;color:var(--mut)}nav a.on{color:var(--fg);font-weight:600}nav form{margin-left:auto}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.filters a{padding:2px 10px;border:1px solid var(--line);border-radius:99px;text-decoration:none}.filters a.on{background:var(--acc);color:var(--bg);border-color:var(--acc)}
@@ -50,6 +50,15 @@ def _page(title: str, body: str) -> HTMLResponse:
         f"<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<link rel=icon type=image/svg+xml href=/icon.svg><title>{html.escape(title)}</title><style>{CSS}</style><main>{body}</main></html>"
     )
+
+
+BULK_JS = """<script>
+(function(){var all=document.getElementById('all'),btn=document.getElementById('delsel'),cnt=document.getElementById('count');
+function picks(){return document.querySelectorAll('.pick')}
+function upd(){var n=document.querySelectorAll('.pick:checked').length;btn.disabled=!n;cnt.textContent=n?n+' selected':''}
+if(all)all.addEventListener('change',function(){picks().forEach(function(c){c.checked=all.checked});upd()});
+picks().forEach(function(c){c.addEventListener('change',upd)});upd()})();
+</script>"""
 
 
 def _nav(active: str) -> str:
@@ -75,6 +84,7 @@ FILTERS = (
     ("flagged", "Flagged", lambda r: r.flag == "flagged"),
 )
 PAGE_SIZE = 50
+MAX_BULK = 100
 
 
 def _ts(epoch: float) -> str:
@@ -104,6 +114,9 @@ def create_app(companion: Companion) -> Starlette:
 
     async def form(request: Request) -> dict[str, str]:
         return {k: v[0] for k, v in parse_qs((await request.body()).decode()).items()}
+
+    async def form_multi(request: Request) -> dict[str, list[str]]:
+        return parse_qs((await request.body()).decode())
 
     def client(request: Request) -> str:
         return request.client.host if request.client else "?"
@@ -184,7 +197,8 @@ def create_app(companion: Companion) -> Starlette:
         return _page("seerrcompanion", "".join(out))
 
     async def requests_page(request: Request) -> Response:
-        if not session_of(request):
+        session = session_of(request)
+        if not session:
             return RedirectResponse("/login", status_code=303)
         rows = companion.view.rows
         out = [_nav("requests"), "<h1>Requests</h1>"]
@@ -203,17 +217,32 @@ def create_app(companion: Companion) -> Starlette:
         out.append("<div class=filters>" + "".join(
             f"<a href='/requests?f={k}'{' class=on' if k == key else ''}>{label} ({sum(1 for r in rows if fn(r))})</a>"
             for k, label, fn in FILTERS) + "</div>")
-        out.append("<div class=wrap><table><tr><th>Title<th>User<th>Seasons<th>Status<th>Available<th>Watched<th>Requested</tr>")
+        token = csrf(session)
+        notice, err = request.query_params.get("m"), request.query_params.get("err")
+        if notice:
+            out.append(f'<div class="msg">{html.escape(notice)}</div>')
+        if err:
+            out.append(f'<div class="msg err">{html.escape(err)}</div>')
+        out.append(
+            f"<form method=post action=/requests/delete id=bulk><input type=hidden name=csrf value={token}>"
+            f"<input type=hidden name=back value='/requests?f={key}&p={page}'>"
+            "<div class=bar><button class=del id=delsel disabled "
+            "onclick=\"return confirm('Delete the '+document.querySelectorAll('.pick:checked').length+' selected title(s) and their files?')\">"
+            "Delete selected</button> <span id=count></span></div>"
+        )
+        out.append("<div class=wrap><table><tr><th><input type=checkbox id=all aria-label='Select all on this page'><th>Title<th>User<th>Seasons<th>Status<th>Available<th>Watched<th>Requested</tr>")
         base = cfg.seerr_public_url or cfg.seerr_url
         for r in shown[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]:
             watched_cls = {"watched": "tag ok", "not watched": "tag bad"}.get(r.watched, "tag")
             flag = f" <span class='tag bad'>{html.escape(r.flag)}</span>" if r.flag in ("flagged", "kept") else ""
             out.append(
-                f"<tr><td><a href='{html.escape(base)}/{'tv' if r.kind == 'tv' else 'movie'}/{r.tmdb_id}'>{html.escape(r.title)}</a>{flag}"
+                f"<tr><td><input type=checkbox class=pick name=m value={r.media_id} aria-label='Select {html.escape(r.title)}'>"
+                f"<td><a href='{html.escape(base)}/{'tv' if r.kind == 'tv' else 'movie'}/{r.tmdb_id}'>{html.escape(r.title)}</a>{flag}"
                 f"<td>{html.escape(r.user_name)}<td>{html.escape(_seasons(r.seasons))}<td>{html.escape(r.status)}"
                 f"<td>{html.escape(r.availability)}<td><span class='{watched_cls}'>{html.escape(r.watched)}</span><td>{_ts(r.created)}</tr>"
             )
-        out.append("</table></div>")
+        out.append("</table></div></form>")
+        out.append(BULK_JS)
         if not shown:
             out.append("<p>No requests match.</p>")
         if pages > 1:
@@ -226,6 +255,42 @@ def create_app(companion: Companion) -> Starlette:
             out.append("<p>" + " &middot; ".join(nav) + "</p>")
         out.append("<p><small>Watch state is shown only for approved, available titles and is re-checked every 15 minutes.</small></p>")
         return _page("Requests", "".join(out))
+
+    async def bulk_delete(request: Request) -> Response:
+        session = session_of(request)
+        if not session:
+            return RedirectResponse("/login", status_code=303)
+        f = await form_multi(request)
+        if not hmac.compare_digest(f.get("csrf", [""])[0], csrf(session)):
+            return Response("Bad CSRF token", status_code=403)
+        back = f.get("back", ["/requests"])[0]
+        back = back if back.startswith("/requests") else "/requests"
+        sep = "&" if "?" in back else "?"
+        try:
+            wanted = {int(m) for m in f.get("m", [])}
+        except ValueError:
+            return RedirectResponse(f"{back}{sep}err={quote('Bad selection')}", status_code=303)
+        # Only media currently in the snapshot can be deleted; never an arbitrary id from the form.
+        known: dict[int, object] = {}
+        for r in companion.view.rows or []:
+            known.setdefault(r.media_id, r)
+        chosen = [known[m] for m in wanted if m in known][:MAX_BULK]
+        if not chosen:
+            return RedirectResponse(f"{back}{sep}err={quote('Nothing selected')}", status_code=303)
+        done, failed = 0, []
+        for r in chosen:
+            try:
+                companion.delete_media(r.media_id, r.title, available=r.availability in ("available", "partial"))
+                done += 1
+            except ValueError as e:
+                return RedirectResponse(f"{back}{sep}err={quote(str(e))}", status_code=303)
+            except httpx.HTTPError as e:
+                log.exception("Seerr delete failed for media %s", r.media_id)
+                failed.append(f"{r.title} ({e})")
+        msg = f"Deleted {done} title(s)."
+        if failed:
+            return RedirectResponse(f"{back}{sep}m={quote(msg)}&err={quote('Failed: ' + '; '.join(failed))}", status_code=303)
+        return RedirectResponse(f"{back}{sep}m={quote(msg)}", status_code=303)
 
     async def act(request: Request) -> Response:
         session = session_of(request)
@@ -257,6 +322,7 @@ def create_app(companion: Companion) -> Starlette:
         Route("/icon.svg", icon),
         Route("/", index),
         Route("/requests", requests_page),
+        Route("/requests/delete", bulk_delete, methods=["POST"]),
         Route("/login", login_page, methods=["GET"]),
         Route("/login", login, methods=["POST"]),
         Route("/logout", logout, methods=["POST"]),

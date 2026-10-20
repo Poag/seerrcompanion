@@ -149,6 +149,17 @@ class Companion:
         self.store.set_state(request_id, "purged")
         self.notifier.send("Deleted", f"'{row['title']}' (requested by {row['user_name']}) has been deleted: {reason}.")
 
+    def delete_media(self, media_id: int, title: str, available: bool, reason: str = "removed in the web UI") -> None:
+        """Delete a title's files (if it has any) and its Seerr media entry, which also drops its requests."""
+        if self.cfg.dry_run:
+            raise ValueError("Dry run: nothing is deleted")
+        if available:
+            self.seerr.delete_media_file(media_id)
+        self.seerr.delete_media(media_id)
+        for row in self.store.flagged_for_media(media_id):
+            self.store.set_state(row["request_id"], "purged")
+        self.notifier.send("Deleted", f"'{title}' has been deleted: {reason}.")
+
     def keep_flagged(self, request_id: int) -> None:
         row = self.store.get_flag(request_id)
         if row is None or row["state"] != "flagged":

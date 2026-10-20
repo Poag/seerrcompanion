@@ -100,3 +100,7 @@ class Store:
     def set_title(self, kind: str, tmdb_id: int, title: str) -> None:
         self._db.execute("INSERT OR REPLACE INTO titles VALUES (?,?,?)", (kind, tmdb_id, title))
         self._db.commit()
+
+    @_locked
+    def flagged_for_media(self, media_id: int) -> list[sqlite3.Row]:
+        return self._db.execute("SELECT * FROM flagged WHERE media_id=? AND state='flagged'", (media_id,)).fetchall()

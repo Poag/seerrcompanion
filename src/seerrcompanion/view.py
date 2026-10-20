@@ -24,6 +24,7 @@ AVAILABILITY = {1: "unknown", 2: "pending", 3: "processing", 4: "partial", 5: "a
 @dataclass(frozen=True)
 class Row:
     request_id: int
+    media_id: int
     title: str
     kind: str
     tmdb_id: int
@@ -71,7 +72,7 @@ class RequestView:
         flags = {f["request_id"]: f["state"] for s in ("flagged", "kept", "cleared", "purged") for f in self._store.flagged(s)}
         rows = [
             Row(
-                request_id=r.id, title=self._title(r), kind=r.kind, tmdb_id=r.tmdb_id, user_name=r.user_name,
+                request_id=r.id, media_id=r.media_id, title=self._title(r), kind=r.kind, tmdb_id=r.tmdb_id, user_name=r.user_name,
                 seasons=r.seasons, status=STATUS.get(r.status, str(r.status)),
                 availability=AVAILABILITY.get(r.media_status, "unknown"), watched=self._watch_state(r, now),
                 created=r.created.timestamp(), flag=flags.get(r.id),

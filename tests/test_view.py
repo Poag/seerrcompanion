@@ -76,3 +76,54 @@ def test_requests_page_requires_login_filters_and_shows_state(tmp_path):
     assert "Show2" in pend and "Show1" not in pend
     assert "Pending (1)" in page and "Approved (1)" in page
     assert c.get("/requests?f=bogus&p=zzz").status_code == 200
+
+
+def _bulk(c, token, media, back="/requests"):
+    body = "&".join([f"csrf={token}", f"back={back}"] + [f"m={m}" for m in media])
+    return c.post("/requests/delete", content=body, headers={"content-type": "application/x-www-form-urlencoded"})
+
+
+def _ui(tmp_path, **cfg):
+    app, seerr, notifier = build([req(1, day=0), req(2, status=1, day=1, media_status=2), req(3, day=2)],
+                                 webui_username="admin", webui_password="pw", data_dir=str(tmp_path), **cfg)
+    app.run_once()
+    c = TestClient(create_app(app), follow_redirects=False)
+    login(c)
+    return c, app, seerr, notifier, re.search(r"name=csrf value=(\w+)", c.get("/requests").text).group(1)
+
+
+def test_requests_page_has_checkboxes():
+    import tempfile
+    c, *_ = _ui(tempfile.mkdtemp())
+    page = c.get("/requests").text
+    assert page.count("class=pick") == 3 and "Delete selected" in page
+
+
+def test_bulk_delete_removes_files_only_when_available(tmp_path):
+    c, app, seerr, notifier, token = _ui(tmp_path)
+    r = _bulk(c, token, [1, 2])
+    assert "m=Deleted%202" in r.headers["location"]
+    assert ("file", 1) in seerr.calls and ("media", 1) in seerr.calls
+    assert ("media", 2) in seerr.calls and ("file", 2) not in seerr.calls  # media 2 has no files yet
+    assert [n[0] for n in notifier.sent] == ["Deleted", "Deleted"]
+
+
+def test_bulk_delete_needs_csrf_login_and_known_media(tmp_path):
+    c, app, seerr, _, token = _ui(tmp_path)
+    assert _bulk(c, "forged", [1]).status_code == 403
+    assert "err=" in _bulk(c, token, [999]).headers["location"]
+    assert seerr.calls == []
+    anon = TestClient(create_app(app), follow_redirects=False)
+    assert _bulk(anon, token, [1]).status_code == 303 and seerr.calls == []
+
+
+def test_bulk_delete_clears_flag_and_dry_run_refuses(tmp_path):
+    c, app, seerr, _, token = _ui(tmp_path)
+    app.seerr.reqs.append(req(4, day=3))
+    app.run_once()  # flags request 3
+    assert [f["request_id"] for f in app.store.flagged()] == [3]
+    _bulk(c, token, [3])
+    assert app.store.get_flag(3)["state"] == "purged"
+    app.cfg = type(app.cfg)(**{**app.cfg.__dict__, "dry_run": True})
+    r = _bulk(c, token, [4])
+    assert "Dry+run" in r.headers["location"] or "Dry%20run" in r.headers["location"]
