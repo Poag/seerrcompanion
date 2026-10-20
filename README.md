@@ -18,6 +18,10 @@ A small companion service for [Seerr](https://github.com/seerr-team/seerr) that 
 | `APPROVE_AFTER_TRIM` | `true` | Approve a request once it has been trimmed |
 | `FLAG_UNWATCHED` | `true` | Feature 1 |
 | `PURGE_AFTER_DAYS` | unset | Delete flagged media (Seerr's file + media delete) after this many days still unwatched. **Off by default; nothing is ever deleted unless you set it** |
+| `WEBUI_USERNAME`, `WEBUI_PASSWORD` | unset | Enable the web UI (port `WEBUI_PORT`, default 8080). Unset means no UI |
+| `WEBUI_URL` | unset | Public URL of the UI; added to notifications as a review link |
+| `SEERR_PUBLIC_URL` | `SEERR_URL` | Base URL for title links in the UI, if `SEERR_URL` is an internal address |
+| `WEBUI_SECRET` | generated | Session signing key; otherwise generated into `/config/webui.secret` |
 | `IGNORE_USER_IDS` | unset | Comma-separated Seerr user ids to skip |
 | `DATA_DIR` | `/config` | Holds `seerrcompanion.db` |
 
@@ -25,10 +29,14 @@ A small companion service for [Seerr](https://github.com/seerr-team/seerr) that 
 docker run -d --name seerrcompanion -v /mnt/user/appdata/seerrcompanion:/config \
   -e SEERR_URL=http://seerr:5055 -e SEERR_API_KEY=... \
   -e TAUTULLI_URL=http://tautulli:8181 -e TAUTULLI_API_KEY=... \
-  -e APPRISE_URLS='discord://...' ghcr.io/poag/seerrcompanion:latest
+  -e APPRISE_URLS='discord://...' -e WEBUI_USERNAME=admin -e WEBUI_PASSWORD=... -p 8080:8080 ghcr.io/poag/seerrcompanion:latest
 ```
 
 `docker exec seerrcompanion seerrcompanion flagged` lists what is currently marked for deletion.
+
+## Web UI
+
+With `WEBUI_USERNAME` and `WEBUI_PASSWORD` set, the container serves a review page on port 8080 listing everything marked for deletion, with **Keep** and **Delete** per title (Delete asks for confirmation and removes the files and the media entry through Seerr). Kept titles are never flagged again. A history table shows past outcomes. Sessions last 7 days in a `SameSite=Strict` cookie, forms carry a CSRF token, and five failed logins from one address locks that address out for five minutes. It serves plain HTTP, so put it behind HTTPS (reverse proxy or Tailscale) before exposing it beyond your LAN. Behind a proxy all clients share the proxy's address, so the lockout applies to everyone at once.
 
 ## Behaviour you need to know
 

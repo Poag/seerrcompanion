@@ -102,11 +102,11 @@ class Companion:
         if self.cfg.dry_run:
             log.info("[DRY] would flag %r (request %s, %s): not watched before request %s", title, prev.id, prev.user_name, new.id)
             return
-        self.store.flag(prev.id, prev.media_id, prev.user_id, prev.user_name, title, new.id)
+        self.store.flag(prev.id, prev.media_id, prev.tmdb_id, prev.user_id, prev.user_name, title, new.id)
         self.notifier.send(
             "Marked for deletion",
             f"{prev.user_name} requested '{title}' but did not watch it before requesting another title. "
-            "It is marked for deletion.",
+            "It is marked for deletion." + (f" Review: {self.cfg.webui_url}" if self.cfg.webui_url else ""),
         )
 
     def review_flagged(self, reqs: list[Request]) -> None:
@@ -125,7 +125,24 @@ class Companion:
                 continue
             days = self.cfg.purge_after_days
             if days is not None and time.time() - row["flagged_at"] >= days * 86400:
-                self.seerr.delete_media_file(r.media_id)
-                self.seerr.delete_media(r.media_id)
-                self.store.set_state(r.id, "purged")
-                self.notifier.send("Deleted", f"'{row['title']}' (requested by {row['user_name']}) was unwatched for {days} days and has been deleted.")
+                self.delete_flagged(r.id, reason=f"unwatched for {days} days")
+
+    # Actions shared by the poller (auto-purge) and the web UI
+
+    def delete_flagged(self, request_id: int, reason: str = "approved") -> None:
+        row = self.store.get_flag(request_id)
+        if row is None or row["state"] != "flagged":
+            raise ValueError(f"Request {request_id} is not awaiting deletion")
+        if self.cfg.dry_run:
+            raise ValueError("Dry run: nothing is deleted")
+        self.seerr.delete_media_file(row["media_id"])
+        self.seerr.delete_media(row["media_id"])
+        self.store.set_state(request_id, "purged")
+        self.notifier.send("Deleted", f"'{row['title']}' (requested by {row['user_name']}) has been deleted: {reason}.")
+
+    def keep_flagged(self, request_id: int) -> None:
+        row = self.store.get_flag(request_id)
+        if row is None or row["state"] != "flagged":
+            raise ValueError(f"Request {request_id} is not awaiting deletion")
+        self.store.set_state(request_id, "kept")
+        log.info("Kept %r (request %s)", row["title"], request_id)

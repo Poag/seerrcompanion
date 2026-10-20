@@ -32,6 +32,15 @@ class Config:
     purge_after_days: int | None = None
     ignore_user_ids: frozenset[int] = field(default_factory=frozenset)
     data_dir: str = "/config"
+    seerr_public_url: str | None = None
+    webui_username: str | None = None
+    webui_password: str | None = None
+    webui_port: int = 8080
+    webui_url: str | None = None  # public base URL of this UI, used in notification links
+
+    @property
+    def webui_enabled(self) -> bool:
+        return bool(self.webui_username and self.webui_password)
 
     @property
     def use_tautulli(self) -> bool:
@@ -58,4 +67,9 @@ class Config:
             purge_after_days=int(purge) if purge else None,
             ignore_user_ids=_int_set("IGNORE_USER_IDS"),
             data_dir=os.environ.get("DATA_DIR", "/config"),
+            seerr_public_url=(os.environ.get("SEERR_PUBLIC_URL") or "").rstrip("/") or None,
+            webui_username=os.environ.get("WEBUI_USERNAME") or None,
+            webui_password=os.environ.get("WEBUI_PASSWORD") or None,
+            webui_port=int(os.environ.get("WEBUI_PORT", "8080")),
+            webui_url=(os.environ.get("WEBUI_URL") or "").rstrip("/") or None,
         )

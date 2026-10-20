@@ -35,14 +35,31 @@ def main() -> None:
     app = Companion(cfg, seerr, watch, Notifier(cfg.apprise_urls), store)
 
     stop = threading.Event()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda *_: stop.set())
-    while not stop.is_set():
-        try:
-            app.run_once()
-        except Exception:
-            log.exception("Poll failed; retrying next interval")
-        stop.wait(cfg.poll_interval)
+
+    def poll() -> None:
+        while not stop.is_set():
+            try:
+                app.run_once()
+            except Exception:
+                log.exception("Poll failed; retrying next interval")
+            stop.wait(cfg.poll_interval)
+
+    if not cfg.webui_enabled:
+        log.info("Web UI disabled (set WEBUI_USERNAME and WEBUI_PASSWORD to enable)")
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, lambda *_: stop.set())
+        poll()
+        return
+
+    import uvicorn
+
+    from .web import create_app
+
+    threading.Thread(target=poll, daemon=True, name="poller").start()
+    try:
+        uvicorn.run(create_app(app), host="0.0.0.0", port=cfg.webui_port, log_level="warning")
+    finally:
+        stop.set()
 
 
 if __name__ == "__main__":
