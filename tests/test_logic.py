@@ -173,3 +173,24 @@ def test_parse_request_tolerates_real_shape():
         "seasons": [{"seasonNumber": 2}, {"seasonNumber": 1}],
     })
     assert (r.kind, r.rating_key, r.plex_id, r.user_name, r.seasons) == ("tv", "4242", 777, "bob", (1, 2))
+
+
+def test_dry_run_judges_each_pair_once(caplog):
+    import logging
+    c = Config(seerr_url="x", seerr_api_key="k", dry_run=True)
+    s = FakeSeerr([req(1, day=0), req(2, day=1)])
+    app = Companion(c, s, FakeWatch(), FakeNotifier(), Store(":memory:"))
+    with caplog.at_level(logging.INFO):
+        app.run_once()
+        app.run_once()
+    assert sum("would flag" in m for m in caplog.messages) == 1
+
+
+def test_untrimmable_warns_once_as_summary(caplog):
+    import logging
+    app, _, _ = build([req(1, status=2, seasons=(1, 2)), req(2, status=2, seasons=(1, 3), tmdb=9)])
+    with caplog.at_level(logging.WARNING):
+        app.run_once()
+        app.run_once()
+    warns = [m for m in caplog.messages if "cannot be trimmed" in m]
+    assert len(warns) == 1 and "1, 2" in warns[0]

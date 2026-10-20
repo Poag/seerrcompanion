@@ -19,6 +19,9 @@ log = logging.getLogger("seerrcompanion")
 
 def main() -> None:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # httpx logs every request URL at INFO, and Tautulli's API key is in its query string.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     cfg = Config.from_env()
     # Dry runs use a throwaway in-memory store so they never affect a later live run.
     os.makedirs(cfg.data_dir, exist_ok=True)

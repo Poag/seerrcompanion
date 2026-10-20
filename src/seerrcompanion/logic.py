@@ -18,12 +18,21 @@ class Companion:
     def __init__(self, cfg: Config, seerr: SeerrClient, watch: WatchSource, notifier: Notifier, store: Store):
         self.cfg, self.seerr, self.watch, self.notifier, self.store = cfg, seerr, watch, notifier, store
         self._baselined = False
+        self._untrimmable: list[Request] = []
 
     def run_once(self) -> None:
         reqs = [r for r in self.seerr.requests() if r.user_id not in self.cfg.ignore_user_ids]
         if self.cfg.trim_seasons:
             for r in reqs:
                 self.trim(r)
+            if self._untrimmable:
+                ids = ", ".join(str(r.id) for r in self._untrimmable)
+                log.warning(
+                    "%d multi-season request(s) were already processed and cannot be trimmed (%s). "
+                    "Remove auto-approve for those users so requests stay pending.",
+                    len(self._untrimmable), ids,
+                )
+                self._untrimmable = []
         if self.cfg.flag_unwatched:
             self.baseline(reqs)
             self.detect(reqs)
@@ -41,13 +50,10 @@ class Companion:
         first = wanted[0]
         if r.status != PENDING:
             # Seerr rejects edits to non-pending requests, and the *arr has usually already
-            # grabbed everything by then. Say so once rather than every poll.
+            # grabbed everything by then. Reported once per request, as one summary line per poll.
             if self.store.warn_untrimmable_once(r.id):
-                log.warning(
-                    "Request %s (%s) asked for seasons %s but is already processed and cannot be "
-                    "trimmed. Remove auto-approve for this user so requests stay pending.",
-                    r.id, r.user_name, list(r.seasons),
-                )
+                self._untrimmable.append(r)
+                log.debug("Request %s (%s) asked for seasons %s; already processed", r.id, r.user_name, list(r.seasons))
             return
         if self.cfg.dry_run:
             log.info("[DRY] would trim request %s (%s) from seasons %s to [%s]", r.id, r.user_name, list(r.seasons), first)
@@ -85,8 +91,8 @@ class Companion:
                 self.consider(prev, new)
             if user_reqs and user_reqs[0].id not in seen:
                 new_ids.append(user_reqs[0].id)
-        if not self.cfg.dry_run:
-            self.store.mark_seen(*new_ids)
+        # In dry-run the store is in-memory (see main), so this never leaks into a later live run.
+        self.store.mark_seen(*new_ids)
 
     def consider(self, prev: Request, new: Request) -> None:
         if prev.kind != "tv" or prev.tmdb_id == new.tmdb_id:
