@@ -9,6 +9,7 @@ import os
 import secrets
 import time
 from datetime import datetime
+from importlib import resources
 from urllib.parse import parse_qs, quote
 
 import httpx
@@ -44,7 +45,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;
 def _page(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(
         f"<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        f"<title>{html.escape(title)}</title><style>{CSS}</style><main>{body}</main></html>"
+        f"<link rel=icon type=image/svg+xml href=/icon.svg><title>{html.escape(title)}</title><style>{CSS}</style><main>{body}</main></html>"
     )
 
 
@@ -176,7 +177,12 @@ def create_app(companion: Companion) -> Starlette:
             return RedirectResponse(f"/?err={quote('Seerr refused the delete: ' + str(e))}", status_code=303)
         return RedirectResponse(f"/?m={quote(msg)}", status_code=303)
 
+    async def icon(request: Request) -> Response:
+        data = resources.files("seerrcompanion").joinpath("static/icon.svg").read_bytes()
+        return Response(data, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
+
     return Starlette(routes=[
+        Route("/icon.svg", icon),
         Route("/", index),
         Route("/login", login_page, methods=["GET"]),
         Route("/login", login, methods=["POST"]),

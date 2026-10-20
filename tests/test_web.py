@@ -77,3 +77,8 @@ def test_tampered_cookie_rejected(ui):
     login(c)
     c.cookies.set("seerrcompanion_session", "admin|9999999999999|deadbeef")
     assert c.get("/").status_code == 303
+
+
+def test_icon_is_public(ui):
+    r = ui[0].get("/icon.svg")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/svg+xml" and b"<svg" in r.content

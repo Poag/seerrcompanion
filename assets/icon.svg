@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="seerrcompanion">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c6cf2"/>
+      <stop offset="1" stop-color="#3b2bb8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- play triangle: what was requested -->
+  <path d="M190 128c-14-8-30 2-30 18v172c0 16 16 26 30 18l150-86c14-8 14-28 0-36z" fill="#fff"/>
+  <!-- badge: the companion's verdict -->
+  <circle cx="368" cy="368" r="86" fill="#ffb02e" stroke="#3b2bb8" stroke-width="20"/>
+  <path d="M328 368l30 30 56-62" fill="none" stroke="#3b2bb8" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

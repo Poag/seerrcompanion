@@ -1,5 +1,7 @@
 # seerrcompanion
 
+<img src="assets/icon.png" width="96" alt="seerrcompanion icon">
+
 A small companion service for [Seerr](https://github.com/seerr-team/seerr) that watches what users request and what they actually watch.
 
 1. **Unwatched requests are marked for deletion.** If a user requests a series, does not watch it, and then requests another title (series or film), the earlier series is marked for deletion and a notification is sent through [Apprise](https://github.com/caronc/apprise).
