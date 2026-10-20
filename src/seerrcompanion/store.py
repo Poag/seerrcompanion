@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS flagged (
     flagged_at REAL NOT NULL,
     state TEXT NOT NULL DEFAULT 'flagged'  -- flagged | kept | cleared | purged
 );
+CREATE TABLE IF NOT EXISTS titles (kind TEXT, tmdb_id INTEGER, title TEXT NOT NULL, PRIMARY KEY (kind, tmdb_id));
 CREATE TABLE IF NOT EXISTS untrimmable (request_id INTEGER PRIMARY KEY);
 """
 
@@ -89,3 +90,13 @@ class Store:
         return self._db.execute(
             "SELECT * FROM flagged WHERE state != 'flagged' ORDER BY flagged_at DESC LIMIT ?", (limit,)
         ).fetchall()
+
+    @_locked
+    def title(self, kind: str, tmdb_id: int) -> str | None:
+        row = self._db.execute("SELECT title FROM titles WHERE kind=? AND tmdb_id=?", (kind, tmdb_id)).fetchone()
+        return row[0] if row else None
+
+    @_locked
+    def set_title(self, kind: str, tmdb_id: int, title: str) -> None:
+        self._db.execute("INSERT OR REPLACE INTO titles VALUES (?,?,?)", (kind, tmdb_id, title))
+        self._db.commit()

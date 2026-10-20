@@ -9,6 +9,7 @@ from .models import APPROVED, DECLINED, PENDING, Request
 from .notify import Notifier
 from .seerr import SeerrClient
 from .store import Store
+from .view import RequestView
 from .watch import WatchSource
 
 log = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ log = logging.getLogger(__name__)
 class Companion:
     def __init__(self, cfg: Config, seerr: SeerrClient, watch: WatchSource, notifier: Notifier, store: Store):
         self.cfg, self.seerr, self.watch, self.notifier, self.store = cfg, seerr, watch, notifier, store
+        self.view = RequestView(seerr, watch, store)
         self._baselined = False
         self._untrimmable: list[Request] = []
 
@@ -37,6 +39,7 @@ class Companion:
             self.baseline(reqs)
             self.detect(reqs)
             self.review_flagged(reqs)
+        self.view.refresh(reqs)
 
     # Feature 2: multi-season request -> first requested season only
 

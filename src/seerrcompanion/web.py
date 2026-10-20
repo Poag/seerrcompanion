@@ -39,6 +39,9 @@ button.del{border-color:var(--bad);color:var(--bad)}button.keep{border-color:var
 input{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%;margin:4px 0 12px}
 a{color:var(--acc)}.msg{padding:8px 12px;border-radius:8px;border:1px solid var(--line);margin:10px 0}.err{border-color:var(--bad);color:var(--bad)}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line)}
+nav{display:flex;gap:16px;align-items:center;margin-bottom:8px}nav a{text-decoration:none;color:var(--mut)}nav a.on{color:var(--fg);font-weight:600}nav form{margin-left:auto}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.filters a{padding:2px 10px;border:1px solid var(--line);border-radius:99px;text-decoration:none}.filters a.on{background:var(--acc);color:var(--bg);border-color:var(--acc)}
+.wrap{overflow-x:auto}.tag{padding:1px 8px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}.ok{color:var(--acc);border-color:var(--acc)}.bad{color:var(--bad);border-color:var(--bad)}
 """
 
 
@@ -47,6 +50,31 @@ def _page(title: str, body: str) -> HTMLResponse:
         f"<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<link rel=icon type=image/svg+xml href=/icon.svg><title>{html.escape(title)}</title><style>{CSS}</style><main>{body}</main></html>"
     )
+
+
+def _nav(active: str) -> str:
+    def a(href, label, key):
+        return f"<a href={href}{' class=on' if key == active else ''}>{label}</a>"
+    return (f"<nav>{a('/', 'Review', 'review')}{a('/requests', 'Requests', 'requests')}"
+            "<form method=post action=/logout><button>Sign out</button></form></nav>")
+
+
+def _seasons(seasons: tuple[int, ...]) -> str:
+    if not seasons:
+        return ""
+    nums = [s for s in seasons if s > 0] or list(seasons)
+    return ("S" + ", ".join(str(n) for n in nums)) if len(nums) < 8 else f"S{nums[0]}-{nums[-1]} ({len(nums)})"
+
+
+FILTERS = (
+    ("all", "All", lambda r: True),
+    ("pending", "Pending", lambda r: r.status == "pending"),
+    ("approved", "Approved", lambda r: r.status == "approved"),
+    ("declined", "Declined", lambda r: r.status == "declined"),
+    ("unwatched", "Not watched", lambda r: r.watched == "not watched"),
+    ("flagged", "Flagged", lambda r: r.flag == "flagged"),
+)
+PAGE_SIZE = 50
 
 
 def _ts(epoch: float) -> str:
@@ -122,7 +150,7 @@ def create_app(companion: Companion) -> Starlette:
         token = csrf(session)
         notice = request.query_params.get("m", "")
         err = request.query_params.get("err")
-        out = ["<div class=top><h1>Marked for deletion</h1><form method=post action=/logout><button>Sign out</button></form></div>"]
+        out = [_nav("review"), "<h1>Marked for deletion</h1>"]
         if cfg.dry_run:
             out.append('<div class="msg">Dry run: nothing is recorded or deleted. Set DRY_RUN=false to go live.</div>')
         if notice:
@@ -155,6 +183,50 @@ def create_app(companion: Companion) -> Starlette:
             out.append("</table>")
         return _page("seerrcompanion", "".join(out))
 
+    async def requests_page(request: Request) -> Response:
+        if not session_of(request):
+            return RedirectResponse("/login", status_code=303)
+        rows = companion.view.rows
+        out = [_nav("requests"), "<h1>Requests</h1>"]
+        if rows is None:
+            out.append("<p>Loading the first snapshot from Seerr; refresh in a moment.</p>")
+            return _page("Requests", "".join(out))
+        key = request.query_params.get("f", "all")
+        flt = {k: fn for k, _, fn in FILTERS}.get(key, FILTERS[0][2])
+        key = key if any(key == k for k, _, _ in FILTERS) else "all"
+        shown = [r for r in rows if flt(r)]
+        pages = max(1, -(-len(shown) // PAGE_SIZE))
+        try:
+            page = min(max(int(request.query_params.get("p", "1")), 1), pages)
+        except ValueError:
+            page = 1
+        out.append("<div class=filters>" + "".join(
+            f"<a href='/requests?f={k}'{' class=on' if k == key else ''}>{label} ({sum(1 for r in rows if fn(r))})</a>"
+            for k, label, fn in FILTERS) + "</div>")
+        out.append("<div class=wrap><table><tr><th>Title<th>User<th>Seasons<th>Status<th>Available<th>Watched<th>Requested</tr>")
+        base = cfg.seerr_public_url or cfg.seerr_url
+        for r in shown[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]:
+            watched_cls = {"watched": "tag ok", "not watched": "tag bad"}.get(r.watched, "tag")
+            flag = f" <span class='tag bad'>{html.escape(r.flag)}</span>" if r.flag in ("flagged", "kept") else ""
+            out.append(
+                f"<tr><td><a href='{html.escape(base)}/{'tv' if r.kind == 'tv' else 'movie'}/{r.tmdb_id}'>{html.escape(r.title)}</a>{flag}"
+                f"<td>{html.escape(r.user_name)}<td>{html.escape(_seasons(r.seasons))}<td>{html.escape(r.status)}"
+                f"<td>{html.escape(r.availability)}<td><span class='{watched_cls}'>{html.escape(r.watched)}</span><td>{_ts(r.created)}</tr>"
+            )
+        out.append("</table></div>")
+        if not shown:
+            out.append("<p>No requests match.</p>")
+        if pages > 1:
+            nav = []
+            if page > 1:
+                nav.append(f"<a href='/requests?f={key}&p={page - 1}'>Previous</a>")
+            nav.append(f"Page {page} of {pages}")
+            if page < pages:
+                nav.append(f"<a href='/requests?f={key}&p={page + 1}'>Next</a>")
+            out.append("<p>" + " &middot; ".join(nav) + "</p>")
+        out.append("<p><small>Watch state is shown only for approved, available titles and is re-checked every 15 minutes.</small></p>")
+        return _page("Requests", "".join(out))
+
     async def act(request: Request) -> Response:
         session = session_of(request)
         if not session:
@@ -184,6 +256,7 @@ def create_app(companion: Companion) -> Starlette:
     return Starlette(routes=[
         Route("/icon.svg", icon),
         Route("/", index),
+        Route("/requests", requests_page),
         Route("/login", login_page, methods=["GET"]),
         Route("/login", login, methods=["POST"]),
         Route("/logout", logout, methods=["POST"]),
