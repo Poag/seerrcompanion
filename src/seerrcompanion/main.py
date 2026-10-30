@@ -6,6 +6,8 @@ import signal
 import sys
 import threading
 
+import httpx
+
 from .config import Config
 from .logic import Companion
 from .notify import Notifier
@@ -15,6 +17,21 @@ from .tautulli import TautulliClient
 from .watch import SeerrWatch, TautulliWatch
 
 log = logging.getLogger("seerrcompanion")
+
+
+def safe_run(app: Companion) -> None:
+    """One poll. A Seerr/Tautulli restart or blip is a one-line warning; anything else gets a traceback."""
+    try:
+        app.run_once()
+    except httpx.TransportError as e:
+        log.warning("Poll failed, will retry next interval: %s: %s", type(e).__name__, e)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code >= 500:
+            log.warning("Poll failed, will retry next interval: %s", e)
+        else:
+            log.exception("Poll failed; retrying next interval")
+    except Exception:
+        log.exception("Poll failed; retrying next interval")
 
 
 def main() -> None:
@@ -41,10 +58,7 @@ def main() -> None:
 
     def poll() -> None:
         while not stop.is_set():
-            try:
-                app.run_once()
-            except Exception:
-                log.exception("Poll failed; retrying next interval")
+            safe_run(app)
             stop.wait(cfg.poll_interval)
 
     if not cfg.webui_enabled:
